@@ -1,78 +1,63 @@
-var express = require('express');
-var path = require('path');
-var cookieParser = require('cookie-parser');
-var logger = require('morgan');
-var socket_io    = require( "socket.io" );
+const express = require('express');
+const path = require('path');
+const logger = require('morgan');
+const http = require('http')
 
-var indexRouter = require('./routes/index');
-var usersRouter = require('./routes/users');
-
-var app = express();
-
-let io = socket_io();
-app.io = io;
-
-let players = {}
+const app = express();
+const port = process.env.PORT || 3000
+const server = http.createServer(app)
 
 
+const io = require('socket.io')(server)
+const p2p = require('socket.io-p2p-server').Server
+io.use(p2p)
 
+let players = []
+let readyCount = 0
 
+io.on('connection', function (socket) {
+  console.log('connected', socket.id)
+  players.push({id:socket.id, isReady:false})
 
-io.on('connection', function(socket){
-  console.log('a user connected', socket.id);
+  console.log('all players', players)
 
-  let player = {
-    name:'test',
-    id:socket.id,
-    x:0,
-    y:0,
-    z:0,
-    rotation:{
-        x:0,
-        y:0,
-        z:0
+  console.log('sending players to all other clients')
+  io.emit('players',players)
+
+  socket.on('ready-up', function (data) {
+    console.log(`${socket.id} is ready`)
+    readyCount++
+
+    console.log(readyCount, io.engine.clientsCount)
+
+    if (readyCount === io.engine.clientsCount) {
+      console.log('seems everyone is ready, lets roll')
+      io.emit('go-private')
     }
-  }
-  players[socket.id] = player
 
-  io.sockets.emit('players', players);
+    // players.map((p) => {
+    //   readyCount++
+    //   if (p.ready) {
+    //     readyCount++
+    //   }
+    //
+    //
+    // })
+  })
 
-  socket.on('disconnect', function(){
-    console.log('user disconnected');
-  });
-
-
-  socket.on('movement', (data) => {
-
-      if (players[data.id]) {
-          players[data.id].x = data.position.x,
-          players[data.id].y = data.position.y,
-          players[data.id].z = data.position.z
-
-          players[data.id].rotation.x = data.rotation.x,
-          players[data.id].rotation.y = data.rotation.y,
-          players[data.id].rotation.z = data.rotation.z
-
-          socket.broadcast.emit("movement", players[data.id])
+  socket.on('disconnect', () => {
+    console.log('disconnected', socket.id)
+    players.forEach((player, index) => {
+      if (socket.id === player.id) {
+        players.splice(index, 1);
+        readyCount = 0
       }
+    })
   })
-
-  socket.on('rocket', (data) => {
-      socket.broadcast.emit("rockets", data)
-  })
-
-});
-
+})
 
 app.use(logger('dev'));
-app.use(express.json());
-app.use(express.urlencoded({ extended: false }));
-app.use(cookieParser());
-app.use('/scripts', express.static(path.join(__dirname, 'node_modules/three/build')));
-// app.use('/scripts', express.static(path.join(__dirname, 'node_modules/three-orbit-controls')));
 app.use(express.static(path.join(__dirname, 'public')));
 
-app.use('/', indexRouter);
-app.use('/users', usersRouter);
 
-module.exports = app;
+server.listen(port, () => console.log(`server listening on ${port}`))
